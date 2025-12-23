@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Top Spending Football Clubs</title>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+
+<style>
+body {
+    font-family: Arial, sans-serif;
+}
+
+.bar {
+    cursor: pointer;
+}
+
+.bar.highlight {
+    stroke: black;
+    stroke-width: 2px;
+}
+
+.tooltip {
+    position: absolute;
+    background: rgba(0,0,0,0.85);
+    color: white;
+    padding: 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    pointer-events: none;
+    opacity: 0;
+}
+
+.legend rect {
+    stroke: black;
+}
+</style>
+</head>
+
+<body>
+
+<h2>Top Spending Football Clubs</h2>
+
+<input type="file" id="file-input"><br><br>
+
+From year:
+<input type="number" id="year-start" value="2000">
+To year:
+<input type="number" id="year-end" value="2000">
+<button id="apply-year">Apply Year Range</button>
+
+<p id="warning-msg" style="color:red; font-weight:bold; display:none;">
+    Invalid dataset or year range! Please try again.
+</p>
+
+<br>
+
+<select id="sort-select">
+    <option value="fee" selected>Sort by Transfer Fee</option>
+    <option value="club">Sort by Club Name</option>
+</select>
+
+<br><br>
+
+<button id="add-club">Add One Club</button>
+<button id="remove-club">Remove Last Club</button>
+
+<br><br>
+
+<svg width="950" height="520"></svg>
+
+<div class="tooltip" id="tooltip"></div>
+
+<script>
+// ---------- SVG setup ----------
+const svg = d3.select("svg");
+const margin = { top: 40, right: 40, bottom: 40, left: 230 };
+const width = +svg.attr("width") - margin.left - margin.right;
+const height = +svg.attr("height") - margin.top - margin.bottom;
+
+const g = svg.append("g")
+    .attr("transform", `translate(${margin.left},${margin.top})`);
+
+const xScale = d3.scaleLinear().range([0, width]);
+const yScale = d3.scaleBand().range([0, height]).padding(0.2);
+
+const xAxisGroup = g.append("g")
+    .attr("transform", `translate(0,${height})`);
+
+const yAxisGroup = g.append("g");
+
+// ---------- Color scale (Top 5 leagues) ----------
+const leagueColor = d3.scaleOrdinal()
+    .domain(["Premier League", "LaLiga", "Bundesliga", "Serie A", "Ligue 1"])
+    .range(["#98df8a", "#ff7f0e", "#d62728", "#1f77b4", "#d3d3d3"]);
+
+const tooltip = d3.select("#tooltip");
+const warning = d3.select("#warning-msg");
+
+let rawData = [];
+let aggregatedData = [];
+let displayCount = 10;
+
+// ---------- Load CSV ----------
+d3.select("#file-input").on("change", function (event) {
+    const reader = new FileReader();
+    reader.onload = e => {
+        rawData = d3.csvParse(e.target.result, d => ({
+            club: d.Club_Joined,
+            league: d.League_Joined,
+            year: +d.Transfer_Window,
+            fee: +d.Transfer_Fee_In_MillionEuro
+        }));
+        updateData();
+    };
+    reader.readAsText(event.target.files[0]);
+});
+
+// ---------- Clear chart ----------
+function clearChart() {
+    g.selectAll(".bar").remove();
+    xAxisGroup.call(d3.axisBottom(xScale.domain([0, 1])));
+    yAxisGroup.call(d3.axisLeft(yScale.domain([])));
+}
+
+// ---------- Update data ----------
+function updateData() {
+    const yStart = +document.getElementById("year-start").value;
+    const yEnd = +document.getElementById("year-end").value;
+
+    // Invalid range
+    if (isNaN(yStart) || isNaN(yEnd) || yStart > yEnd) {
+        warning.style("display", "block");
+        clearChart();
+        return;
+    }
+
+    const filtered = rawData.filter(d => d.year >= yStart && d.year <= yEnd);
+
+    // Empty result
+    if (filtered.length === 0) {
+        warning.style("display", "block");
+        clearChart();
+        return;
+    }
+
+    warning.style("display", "none");
+
+    aggregatedData = Array.from(
+        d3.rollup(
+            filtered,
+            v => ({
+                fee: d3.sum(v, d => d.fee),
+                league: v[0].league
+            }),
+            d => d.club
+        ),
+        ([club, obj]) => ({
+            club,
+            fee: obj.fee,
+            league: obj.league
+        })
+    );
+
+    sortData();
+    draw();
+}
+
+// ---------- Sorting ----------
+function sortData() {
+    const criterion = d3.select("#sort-select").property("value");
+    aggregatedData.sort((a, b) =>
+        criterion === "club"
+            ? d3.ascending(a.club, b.club)
+            : d3.descending(a.fee, b.fee)
+    );
+}
+
+// ---------- Draw / Update ----------
+function draw() {
+    const data = aggregatedData.slice(0, displayCount);
+
+    xScale.domain([0, d3.max(data, d => d.fee)]);
+    yScale.domain(data.map(d => d.club));
+
+    const bars = g.selectAll(".bar")
+        .data(data, d => d.club); // key binding
+
+    // EXIT
+    bars.exit()
+        .transition().duration(700)
+        .attr("width", 0)
+        .remove();
+
+    // UPDATE
+    bars.transition().duration(700)
+        .attr("y", d => yScale(d.club))
+        .attr("width", d => xScale(d.fee))
+        .attr("height", yScale.bandwidth())
+        .attr("fill", d => leagueColor(d.league));
+
+    // ENTER
+    bars.enter()
+        .append("rect")
+        .attr("class", "bar highlight")
+        .attr("y", d => yScale(d.club))
+        .attr("height", yScale.bandwidth())
+        .attr("x", 0)
+        .attr("width", 0)
+        .attr("fill", d => leagueColor(d.league))
+        .on("mousemove", (event, d) => {
+            tooltip
+                .style("left", event.pageX + 10 + "px")
+                .style("top", event.pageY - 20 + "px")
+                .html(
+                    `<strong>${d.club}</strong><br>
+                     League: ${d.league}<br>
+                     Spending: €${d.fee.toFixed(2)}M`
+                )
+                .transition().duration(200).style("opacity", 1);
+        })
+        .on("mouseout", () =>
+            tooltip.transition().duration(200).style("opacity", 0)
+        )
+        .transition()
+        .duration(700)
+        .on("start", function () {
+            d3.select(this).classed("highlight", true);
+        })
+        .attr("width", d => xScale(d.fee))
+        .on("end", function () {
+            d3.select(this).classed("highlight", false);
+        });
+
+    xAxisGroup.transition().duration(700).call(d3.axisBottom(xScale));
+    yAxisGroup.transition().duration(700).call(d3.axisLeft(yScale));
+}
+
+// ---------- Controls ----------
+d3.select("#apply-year").on("click", updateData);
+
+d3.select("#sort-select").on("change", () => {
+    sortData();
+    draw();
+});
+
+d3.select("#add-club").on("click", () => {
+    if (displayCount < aggregatedData.length) {
+        displayCount++;
+        draw();
+    }
+});
+
+d3.select("#remove-club").on("click", () => {
+    if (displayCount > 1) {
+        displayCount--;
+        draw();
+    }
+});
+</script>
+
+</body>
+</html>
