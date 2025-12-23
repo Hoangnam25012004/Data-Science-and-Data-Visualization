@@ -1,0 +1,35 @@
+body {
+  font-family: Arial, sans-serif;
+  background: #f5f7fa;
+  padding: 20px;
+}
+
+h2 {
+  text-align: center;
+}
+
+svg {
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+
+circle {
+  opacity: 0.7;
+  transition: all 0.2s;
+}
+
+circle:hover {
+  opacity: 1;
+  stroke: #000;
+  stroke-width: 1.5;
+}
+
+.tooltip {
+  position: absolute;
+  background: white;
+  border: 1px solid #ccc;
+  padding: 8px;
+  font-size: 12px;
+  pointer-events: none;
+}
