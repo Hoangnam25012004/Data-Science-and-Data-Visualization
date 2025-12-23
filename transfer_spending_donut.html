@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Top 5 Leagues — Transfer Spending Distribution (Donut Charts)</title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <style>
+    :root { --border:#e5e7eb; --text:#111827; --muted:#6b7280; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 20px; color: var(--text); }
+    .row { display:flex; gap: 18px; flex-wrap: wrap; align-items: flex-start; }
+    .panel { border:1px solid var(--border); border-radius: 12px; padding: 14px; box-shadow: 0 1px 2px rgba(0,0,0,.04); background:#fff; }
+    .controls { display:flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+    label { font-size: 13px; color: var(--muted); }
+    select, input[type="number"] { padding: 6px 8px; border:1px solid var(--border); border-radius: 8px; }
+    input[type="file"] { padding: 6px; }
+    .charts { display:grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 18px; }
+    .chartWrap { display:flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .legend { min-width: 220px; max-width: 360px; }
+    .legend .item { display:flex; align-items:center; gap:8px; margin: 4px 0; font-size: 13px; color: var(--text); }
+    .legend .swatch { width: 12px; height: 12px; border-radius: 3px; flex: 0 0 auto; }
+    .hint { font-size: 13px; color: var(--muted); margin: 6px 0 0; }
+    .err { color: #b91c1c; font-size: 13px; margin-top: 8px; }
+    .title { font-weight: 700; font-size: 16px; margin: 0 0 8px; }
+  </style>
+</head>
+<body>
+  <h2 style="margin:0 0 8px;">How is total spending distributed?</h2>
+  <div class="panel">
+    <div class="controls">
+      <div>
+        <label>Upload dataset CSV (e.g. All_Trans_2000_2024_Top5Leagues.csv)</label><br/>
+        <input id="fileInput" type="file" accept=".csv" />
+      </div>
+      <div>
+        <label>Year (Transfer_Window)</label><br/>
+        <select id="yearSelect" disabled></select>
+      </div>
+      <div>
+        <label>Club chart league filter</label><br/>
+        <select id="leagueFilter" disabled>
+          <option value="__ALL__">All leagues</option>
+        </select>
+      </div>
+      <div>
+        <label>Top N clubs</label><br/>
+        <input id="topN" type="number" min="5" max="50" step="1" value="20" disabled />
+      </div>
+    </div>
+    <div class="hint">
+      The number in the center of each donut is the <b>total spending</b> (sum of Transfer_Fee_In_MillionEuro) for that chart.
+    </div>
+    <div id="error" class="err"></div>
+  </div>
+
+  <div class="charts" style="margin-top:18px;">
+    <div class="panel">
+      <div class="title">Spending distribution by League</div>
+      <div class="chartWrap">
+        <svg id="leagueChart" width="380" height="380" aria-label="League spending donut"></svg>
+        <div id="leagueLegend" class="legend"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="title">Spending distribution by Club</div>
+      <div class="chartWrap">
+        <svg id="clubChart" width="380" height="380" aria-label="Club spending donut"></svg>
+        <div id="clubLegend" class="legend"></div>
+      </div>
+    </div>
+  </div>
+
+<script>
+(() => {
+  const fileInput = document.getElementById("fileInput");
+  const yearSelect = document.getElementById("yearSelect");
+  const leagueFilter = document.getElementById("leagueFilter");
+  const topNInput = document.getElementById("topN");
+  const errEl = document.getElementById("error");
+
+  const leagueSvg = d3.select("#leagueChart");
+  const clubSvg   = d3.select("#clubChart");
+
+  let rows = [];
+
+  const fmtEUR = (m) => {
+    // dataset is in million Euro
+    const val = d3.format(",.1f")(m);
+    return `${val}M EUR`;
+  };
+
+  function setError(msg="") { errEl.textContent = msg; }
+
+  function parseAndValidate(csvText){
+    const parsed = d3.csvParse(csvText);
+    // Basic column check (matches your dataset)
+    const required = ["Transfer_Window","League_Joined","Club_Joined","Transfer_Fee_In_MillionEuro"];
+    const missing = required.filter(c => !parsed.columns.includes(c));
+    if(missing.length){
+      throw new Error(`Missing required columns: ${missing.join(", ")}.`);
+    }
+
+    // Normalize + coerce types
+    return parsed.map(d => ({
+      Transfer_Window: +d.Transfer_Window,
+      League_Joined: (d.League_Joined ?? "").trim(),
+      Club_Joined: (d.Club_Joined ?? "").trim(),
+      fee: +d.Transfer_Fee_In_MillionEuro
+    })).filter(d =>
+      Number.isFinite(d.Transfer_Window) &&
+      d.League_Joined &&
+      d.Club_Joined &&
+      Number.isFinite(d.fee) && d.fee > 0
+    );
+  }
+
+  function fillSelect(selectEl, values, {includeAll=false, allValue="__ALL__", allLabel="All"} = {}){
+    selectEl.innerHTML = "";
+    if(includeAll){
+      const opt = document.createElement("option");
+      opt.value = allValue; opt.textContent = allLabel;
+      selectEl.appendChild(opt);
+    }
+    for(const v of values){
+      const opt = document.createElement("option");
+      opt.value = v; opt.textContent = v;
+      selectEl.appendChild(opt);
+    }
+  }
+
+  function rollupSum(data, keyFn){
+    // returns array of {label, value} sorted desc
+    const m = d3.rollup(data, v => d3.sum(v, d => d.fee), keyFn);
+    return Array.from(m, ([label, value]) => ({label, value}))
+      .filter(d => d.value > 0)
+      .sort((a,b) => d3.descending(a.value, b.value));
+  }
+
+  function topNWithOthers(arr, n, othersLabel="Others"){
+    if(arr.length <= n) return arr;
+    const top = arr.slice(0, n);
+    const rest = arr.slice(n);
+    const others = { label: othersLabel, value: d3.sum(rest, d => d.value) };
+    if(others.value > 0) top.push(others);
+    return top;
+  }
+
+  function drawDonut(svg, legendEl, data, {centerTitle, centerTotal}){
+    const W = +svg.attr("width"), H = +svg.attr("height");
+    const r = Math.min(W, H) / 2 - 8;
+    const inner = r * 0.58;
+
+    svg.selectAll("*").remove();
+    d3.select(legendEl).selectAll("*").remove();
+
+    const g = svg.append("g").attr("transform", `translate(${W/2},${H/2})`);
+
+    const color = d3.scaleOrdinal()
+      .domain(data.map(d => d.label))
+      .range(d3.schemeTableau10.concat(d3.schemeSet3)); // plenty of distinct colors
+
+    const pie = d3.pie()
+      .sort(null)
+      .value(d => d.value);
+
+    const arc = d3.arc().innerRadius(inner).outerRadius(r);
+    const arcHover = d3.arc().innerRadius(inner).outerRadius(r + 8);
+
+    const tooltip = d3.select("body").append("div")
+      .style("position","fixed")
+      .style("pointer-events","none")
+      .style("background","#111827")
+      .style("color","white")
+      .style("padding","8px 10px")
+      .style("border-radius","8px")
+      .style("font-size","12px")
+      .style("opacity",0);
+
+    const arcs = g.selectAll("path")
+      .data(pie(data))
+      .join("path")
+      .attr("d", arc)
+      .attr("fill", d => color(d.data.label))
+      .attr("stroke", "white")
+      .attr("stroke-width", 1)
+      .on("mousemove", (event, d) => {
+        const pct = (d.data.value / d3.sum(data, x => x.value)) * 100;
+        tooltip
+          .style("opacity",1)
+          .style("left", (event.clientX + 12) + "px")
+          .style("top", (event.clientY + 12) + "px")
+          .html(`<b>${d.data.label}</b><br/>${fmtEUR(d.data.value)}<br/>${pct.toFixed(1)}%`);
+      })
+      .on("mouseleave", () => tooltip.style("opacity",0))
+      .on("mouseenter", function(){ d3.select(this).transition().duration(120).attr("d", arcHover); })
+      .on("mouseout", function(){ d3.select(this).transition().duration(120).attr("d", arc); });
+
+    // Center texts
+    g.append("text")
+      .attr("text-anchor","middle")
+      .attr("y",-6)
+      .style("font-size","14px")
+      .style("font-weight","700")
+      .text(centerTitle);
+
+    g.append("text")
+      .attr("text-anchor","middle")
+      .attr("y",16)
+      .style("font-size","13px")
+      .style("font-weight","600")
+      .text(centerTotal);
+
+    // Legend
+    const total = d3.sum(data, d => d.value);
+    const legend = d3.select(legendEl);
+
+    legend.selectAll("div.item")
+      .data(data)
+      .join("div")
+      .attr("class","item")
+      .html(d => {
+        const pct = total ? (d.value/total*100) : 0;
+        return `<span class="swatch" style="background:${color(d.label)}"></span>
+                <span>${d.label} — ${pct.toFixed(1)}%</span>`;
+      });
+  }
+
+  function update(){
+    if(!rows.length) return;
+
+    const year = +yearSelect.value;
+    const leagueSel = leagueFilter.value;
+    const topN = Math.max(5, Math.min(50, +topNInput.value || 20));
+
+    const dataYear = rows.filter(d => d.Transfer_Window === year);
+
+    // League spending
+    const leagueAgg = rollupSum(dataYear, d => d.League_Joined);
+    drawDonut(
+      leagueSvg,
+      document.getElementById("leagueLegend"),
+      leagueAgg,
+      { centerTitle: `Spend ${year}`, centerTotal: `Total: ${fmtEUR(d3.sum(leagueAgg, d => d.value))}` }
+    );
+
+    // Club spending (filtered by league if selected)
+    const dataForClub = (leagueSel === "__ALL__")
+      ? dataYear
+      : dataYear.filter(d => d.League_Joined === leagueSel);
+
+    let clubAgg = rollupSum(dataForClub, d => d.Club_Joined);
+    clubAgg = topNWithOthers(clubAgg, topN, "Others");
+
+    const clubCenterTitle = (leagueSel === "__ALL__") ? `Spend ${year}` : `Spend ${year} (${leagueSel})`;
+    drawDonut(
+      clubSvg,
+      document.getElementById("clubLegend"),
+      clubAgg,
+      { centerTitle: clubCenterTitle, centerTotal: `Total: ${fmtEUR(d3.sum(clubAgg, d => d.value))}` }
+    );
+  }
+
+  function enableControls(){
+    yearSelect.disabled = false;
+    leagueFilter.disabled = false;
+    topNInput.disabled = false;
+  }
+
+  fileInput.addEventListener("change", async (e) => {
+    setError("");
+    const file = e.target.files?.[0];
+    if(!file) return;
+
+    try{
+      const text = await file.text();
+      rows = parseAndValidate(text);
+
+      if(!rows.length) throw new Error("No valid rows after cleaning. Check fee/year columns.");
+
+      const years = Array.from(new Set(rows.map(d => d.Transfer_Window))).sort((a,b) => a-b);
+      fillSelect(yearSelect, years);
+      yearSelect.value = years[years.length - 1]; // default latest
+
+      const leagues = Array.from(new Set(rows.map(d => d.League_Joined))).sort(d3.ascending);
+      fillSelect(leagueFilter, leagues, {includeAll:true, allValue:"__ALL__", allLabel:"All leagues"});
+      leagueFilter.value = "__ALL__";
+
+      enableControls();
+      update();
+    }catch(err){
+      setError(err.message || String(err));
+      rows = [];
+    }
+  });
+
+  yearSelect.addEventListener("change", update);
+  leagueFilter.addEventListener("change", update);
+  topNInput.addEventListener("input", () => {
+    // small debounce feel
+    clearTimeout(topNInput._t);
+    topNInput._t = setTimeout(update, 150);
+  });
+
+})();
+</script>
+</body>
+</html>
