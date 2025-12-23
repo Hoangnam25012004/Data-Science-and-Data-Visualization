@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Football Transfer Trends Over Time - D3.js Visualization</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <h1>⚽ Football Transfer Market Analysis</h1>
+        <p class="subtitle">How Transfer Spending, Average Fees, and Volume Changed Over Time (2000-2024)</p>
+
+        <div id="loading" class="loading">Loading data...</div>
+        <div class="stats-container" id="stats"></div>
+
+        <div class="controls-container" id="controls" style="display: none;">
+            <div class="filter-group">
+                <label for="team-select">Select Team:</label>
+                <select id="team-select">
+                    <option value="">Choose a team...</option>
+                </select>
+            </div>
+            <button id="reset-filters" class="reset-btn">Reset</button>
+        </div>
+
+
+        <div id="content" style="display: none;">
+            <div class="charts-grid">
+                <div class="chart-container full-width">
+                    <h2>Team Transfer Activity Over Time</h2>
+                    <svg id="chart-team-transfers" viewBox="0 0 1200 400"></svg>
+                    <div class="legend">
+                        <div class="legend-item">
+                            <div class="legend-color color-team"></div>
+                            <span>Number of Transfers per Year</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="chart-container">
+                    <h2>Total Transfer Spending by Year</h2>
+                    <svg id="chart-total-spend" viewBox="0 0 600 350"></svg>
+                    <div class="legend">
+                        <div class="legend-item">
+                            <div class="legend-color color-total"></div>
+                            <span>Total Spending (Million €)</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="chart-container">
+                    <h2>Average Transfer Fee by Year</h2>
+                    <svg id="chart-avg-fee" viewBox="0 0 600 350"></svg>
+                    <div class="legend">
+                        <div class="legend-item">
+                            <div class="legend-color color-avg"></div>
+                            <span>Average Fee (Million €)</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="chart-container full-width">
+                    <h2>Number of Transfers by Year</h2>
+                    <svg id="chart-transfer-count" viewBox="0 0 1200 300"></svg>
+                    <div class="legend">
+                        <div class="legend-item">
+                            <div class="legend-color color-count"></div>
+                            <span>Transfer Count</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="chart-container full-width">
+                    <h2>All Metrics Combined - Normalized View</h2>
+                    <svg id="chart-combined" viewBox="0 0 1200 350"></svg>
+                    <div class="legend">
+                        <div class="legend-item">
+                            <div class="legend-color color-total"></div>
+                            <span>Total Spending</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color color-avg"></div>
+                            <span>Average Fee</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color color-count"></div>
+                            <span>Transfer Volume</span>
+                        </div>
+                    </div>
+                </div>
+
+                
+            </div>
+
+        </div>
+    </div>
+
+    <div class="tooltip" id="tooltip"></div>
+    <script src="script.js"></script>
+</body>
+</html>
